@@ -139,6 +139,7 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
     private void ShowQrToPlayer(CCSPlayerController player, string loginUrl)
     {
         string qrText = GenerateQrText(loginUrl);
+        string displayText = ">> SCAN THIS QR CODE <<\n" + qrText + "\n>> " + loginUrl + " <<";
 
         Console.WriteLine($"[{ModuleName}] QR for {player.PlayerName}:");
         Console.WriteLine(qrText);
@@ -147,12 +148,12 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
         {
             _activeQrs[player.Slot] = new ActiveQr
             {
-                Text = qrText,
+                Text = displayText,
                 ExpireAt = DateTime.UtcNow.AddSeconds(Config.QrDisplaySeconds)
             };
         }
 
-        player.PrintToCenter(qrText);
+        player.PrintToCenter(displayText);
 
         player.PrintToChat($" {ChatColors.Green}Scan QR code on screen with your phone");
         player.PrintToChat($" {ChatColors.Default}{loginUrl}");
@@ -195,7 +196,7 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
         using var gen = new QRCodeGenerator();
         using var data = gen.CreateQrCode(loginUrl, QRCodeGenerator.ECCLevel.Q);
         using var qr = new AsciiQRCode(data);
-        return qr.GetGraphic(2, "█", " ");
+        return qr.GetGraphic(1, "##", "  ");
     }
 
     private Task DispatchToMain(Action action)
