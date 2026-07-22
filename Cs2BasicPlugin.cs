@@ -140,20 +140,26 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
 
     private void ShowQrToPlayer(CCSPlayerController player, string loginUrl)
     {
-        string qrAscii = GenerateQrAscii(loginUrl);
+        string qrNormal = GenerateQrAscii(loginUrl, "#", " ");
+        string qrInvert = GenerateQrAscii(loginUrl, " ", "#");
 
         // Log raw QR to server console for debugging
         Console.WriteLine($"[{ModuleName}] QR for {player.PlayerName}:");
-        Console.WriteLine(qrAscii);
+        Console.WriteLine(qrNormal);
 
         // 1. Center screen instruction
         player.PrintToCenterHtml("<font color='#00FF00'>Open console (~) to scan QR code</font>");
 
         // 2. Print QR code to player's console (monospace font, scannable)
-        player.PrintToConsole("------------------- QR Login ------------------");
-        foreach (string line in qrAscii.Split('\n'))
+        player.PrintToConsole("=============== QR Login (try both) ===============");
+        player.PrintToConsole("--- Version 1 (dark on light) ---");
+        foreach (string line in qrNormal.Split('\n'))
             player.PrintToConsole(line.TrimEnd('\r'));
-        player.PrintToConsole("------------------------------------------------");
+        player.PrintToConsole("");
+        player.PrintToConsole("--- Version 2 (light on dark) ---");
+        foreach (string line in qrInvert.Split('\n'))
+            player.PrintToConsole(line.TrimEnd('\r'));
+        player.PrintToConsole("---------------------------------------------------");
         player.PrintToConsole($"URL: {loginUrl}");
         player.PrintToConsole("Scan the QR code above with your phone.");
 
@@ -162,12 +168,12 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
         player.PrintToChat($" {ChatColors.Default}{loginUrl}");
     }
 
-    private static string GenerateQrAscii(string loginUrl)
+    private static string GenerateQrAscii(string loginUrl, string dark, string light)
     {
         using var gen = new QRCodeGenerator();
         using var data = gen.CreateQrCode(loginUrl, QRCodeGenerator.ECCLevel.Q);
         using var qr = new AsciiQRCode(data);
-        return qr.GetGraphic(1, "#", " ");
+        return qr.GetGraphic(1, dark, light);
     }
 
     private Task DispatchToMain(Action action)
