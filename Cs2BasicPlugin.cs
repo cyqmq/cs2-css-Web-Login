@@ -51,7 +51,7 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
             return;
         }
 
-        player.PrintToCenterHtml("Connecting...");
+        player.PrintToCenterHtml("Connecting...<br>Please wait");
 
         var steamId = player.SteamID.ToString();
         var playerName = player.PlayerName;
@@ -145,6 +145,9 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
     {
         string qrHtml = BuildQrHtml(loginUrl);
 
+        // Test multi-line rendering first
+        player.PrintToCenterHtml("LINE1<br>LINE2<br>LINE3");
+
         lock (_activeQrs)
         {
             _activeQrs[player.Slot] = new ActiveQr
@@ -197,7 +200,7 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
         using var gen = new QRCodeGenerator();
         using var data = gen.CreateQrCode(loginUrl, QRCodeGenerator.ECCLevel.Q);
         using var qr = new AsciiQRCode(data);
-        string ascii = qr.GetGraphic(1);
+        string ascii = qr.GetGraphicSmall(drawQuietZones: true, invert: false);
         return ascii.Replace("\r\n", "<br>").Replace("\n", "<br>")
             + "<br><font color='#00FF00'>Scan QR code to login</font>";
     }
