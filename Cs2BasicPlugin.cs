@@ -3,11 +3,7 @@ using System.Text.Json;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Modules.Commands;
-using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
-using CS2MenuManager.API.Class;
-using CS2MenuManager.API.Enum;
-using CS2MenuManager.API.Menu;
 using QRCoder;
 
 namespace cs2_basic_plugin;
@@ -35,6 +31,9 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
     public PluginConfig Config { get; set; } = new();
     private readonly HttpClient _httpClient = new();
 
+    // Track active QR displays per player (key = player.Slot)
+    private readonly Dictionary<int, ActiveQr> _activeQrs = new();
+
     public void OnConfigParsed(PluginConfig config)
     {
         Config = config;
@@ -43,6 +42,7 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
     public override void Load(bool hotReload)
     {
         AddCommand(Config.CommandName, "Request a QR login link", OnLoginCommand);
+        RegisterListener<Listeners.OnTick>(OnTick);
         Console.WriteLine($"[{ModuleName}] Loaded. Backend: {Config.BackendUrl}");
     }
 
@@ -111,32 +111,50 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
     {
         string qrHtml = BuildQrHtml(loginUrl);
 
-        // Show QR on screen, refresh every second to keep it visible
+        // Register active QR display for OnTick refresh
+        _activeQrs[player.Slot] = new ActiveQr
+        {
+            Html = qrHtml,
+            StartTime = DateTime.UtcNow,
+            Duration = Config.QrDisplaySeconds
+        };
+
+        // Show immediately
         player.PrintToCenterHtml(qrHtml);
-
-        int elapsed = 0;
-        AddTimer(1.0f, () =>
-        {
-            elapsed++;
-            if (elapsed >= Config.QrDisplaySeconds || !player.IsValid)
-                return;
-            player.PrintToCenterHtml(qrHtml);
-        }, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
-
-        // Console menu (CS2MenuManager)
-        var consoleMenu = new ConsoleMenu("QR Login", this);
-        consoleMenu.AddItem($"URL: {loginUrl}", DisableOption.DisableHideNumber);
-        consoleMenu.AddItem("Re-display QR", (p, o) =>
-        {
-            p.PrintToCenterHtml(qrHtml);
-            elapsed = 0;
-        });
-        consoleMenu.AddItem("Close", (p, o) => { });
-        consoleMenu.Display(player, Config.QrDisplaySeconds);
 
         // Chat fallback
         player.PrintToChat($" {ChatColors.Green}Scan QR code to login:");
         player.PrintToChat($" {ChatColors.Default}{loginUrl}");
+    }
+
+    private void OnTick()
+    {
+        var now = DateTime.UtcNow;
+        List<int> toRemove = new();
+
+        foreach (var kvp in _activeQrs)
+        {
+            var slot = kvp.Key;
+            var active = kvp.Value;
+
+            if ((now - active.StartTime).TotalSeconds >= active.Duration)
+            {
+                toRemove.Add(slot);
+                continue;
+            }
+
+            var player = FindPlayerBySlot(slot);
+            if (player == null)
+            {
+                toRemove.Add(slot);
+                continue;
+            }
+
+            player.PrintToCenterHtml(active.Html);
+        }
+
+        foreach (var userId in toRemove)
+            _activeQrs.Remove(userId);
     }
 
     private static string BuildQrHtml(string loginUrl)
@@ -156,6 +174,11 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
         return sb.ToString();
     }
 
+    private static CCSPlayerController? FindPlayerBySlot(int slot)
+    {
+        return Utilities.GetPlayers().FirstOrDefault(p => p.IsValid && p.Slot == slot);
+    }
+
     private Task DispatchToMain(Action action)
     {
         var tcs = new TaskCompletionSource();
@@ -170,7 +193,15 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
     public override void Unload(bool hotReload)
     {
         _httpClient.Dispose();
+        _activeQrs.Clear();
     }
+}
+
+public class ActiveQr
+{
+    public string Html { get; set; } = "";
+    public DateTime StartTime { get; set; }
+    public int Duration { get; set; }
 }
 
 public class LoginResponse
