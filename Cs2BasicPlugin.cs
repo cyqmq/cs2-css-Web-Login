@@ -3,6 +3,7 @@ using System.Text.Json;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Modules.Commands;
+using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
 using CS2MenuManager.API.Class;
 using CS2MenuManager.API.Enum;
@@ -54,7 +55,6 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
             return;
         }
 
-        // Immediate visible test
         player.PrintToCenterHtml("Connecting to auth server...");
 
         var steamId = player.SteamID.ToString();
@@ -109,45 +109,51 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
 
     private void ShowQrToPlayer(CCSPlayerController player, string loginUrl)
     {
-        string qrAscii = GenerateAsciiQr(loginUrl);
+        string qrHtml = BuildQrHtml(loginUrl);
 
-        // 1. ASCII QR code on screen (using <pre> for monospace)
-        string[] qrLines = qrAscii.Split('\n');
-        var sb = new StringBuilder();
-        sb.AppendLine("<pre>");
-        foreach (string line in qrLines)
-            sb.AppendLine(line);
-        sb.AppendLine("</pre>");
-        sb.AppendLine("<font color='#00FF00'>Scan QR code to login</font>");
-        player.PrintToCenterHtml(sb.ToString());
+        // Show QR on screen, refresh every second to keep it visible
+        player.PrintToCenterHtml(qrHtml);
 
-        // 2. Console menu (CS2MenuManager) with URL + actions
+        int elapsed = 0;
+        AddTimer(1.0f, () =>
+        {
+            elapsed++;
+            if (elapsed >= Config.QrDisplaySeconds || !player.IsValid)
+                return;
+            player.PrintToCenterHtml(qrHtml);
+        }, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
+
+        // Console menu (CS2MenuManager)
         var consoleMenu = new ConsoleMenu("QR Login", this);
         consoleMenu.AddItem($"URL: {loginUrl}", DisableOption.DisableHideNumber);
-        consoleMenu.AddItem("Show on screen again", (p, o) =>
+        consoleMenu.AddItem("Re-display QR", (p, o) =>
         {
-            var sb2 = new StringBuilder();
-            sb2.AppendLine("<pre>");
-            foreach (string line in qrLines)
-                sb2.AppendLine(line);
-            sb2.AppendLine("</pre>");
-            sb2.AppendLine("<font color='#00FF00'>Scan QR code to login</font>");
-            p.PrintToCenterHtml(sb2.ToString());
+            p.PrintToCenterHtml(qrHtml);
+            elapsed = 0;
         });
         consoleMenu.AddItem("Close", (p, o) => { });
         consoleMenu.Display(player, Config.QrDisplaySeconds);
 
-        // 3. Chat fallback
+        // Chat fallback
         player.PrintToChat($" {ChatColors.Green}Scan QR code to login:");
         player.PrintToChat($" {ChatColors.Default}{loginUrl}");
     }
 
-    private static string GenerateAsciiQr(string text)
+    private static string BuildQrHtml(string loginUrl)
     {
         using var gen = new QRCodeGenerator();
-        using var data = gen.CreateQrCode(text, QRCodeGenerator.ECCLevel.Q);
+        using var data = gen.CreateQrCode(loginUrl, QRCodeGenerator.ECCLevel.Q);
         using var qr = new AsciiQRCode(data);
-        return qr.GetGraphic(1);
+        string qrAscii = qr.GetGraphic(1);
+        string[] lines = qrAscii.Split('\n');
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<pre>");
+        foreach (string line in lines)
+            sb.AppendLine(line);
+        sb.AppendLine("</pre>");
+        sb.AppendLine("<font color='#00FF00'>Scan QR code to login</font>");
+        return sb.ToString();
     }
 
     private Task DispatchToMain(Action action)
