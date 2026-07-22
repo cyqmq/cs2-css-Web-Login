@@ -145,8 +145,9 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
     {
         string qrHtml = BuildQrHtml(loginUrl);
 
-        // Test multi-line rendering first
-        player.PrintToCenterHtml("LINE1<br>LINE2<br>LINE3");
+        // Log raw QR to server console for debugging
+        Console.WriteLine($"[{ModuleName}] QR for {player.PlayerName}:");
+        Console.WriteLine(qrHtml.Replace("<br>", "\n"));
 
         lock (_activeQrs)
         {
@@ -201,8 +202,17 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
         using var data = gen.CreateQrCode(loginUrl, QRCodeGenerator.ECCLevel.Q);
         using var qr = new AsciiQRCode(data);
         string ascii = qr.GetGraphicSmall(drawQuietZones: true, invert: false);
-        return ascii.Replace("\r\n", "<br>").Replace("\n", "<br>")
-            + "<br><font color='#00FF00'>Scan QR code to login</font>";
+        string[] lines = ascii.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        var sb = new StringBuilder();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string clean = lines[i].Replace("\r", "");
+            sb.Append(i + 1).Append(":(").Append(clean.Length).Append(") ")
+              .Append(clean).Append("<br>");
+        }
+        sb.Append("<font color='#00FF00'>Scan QR code to login</font>");
+        return sb.ToString();
     }
 
     private Task DispatchToMain(Action action)
