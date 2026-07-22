@@ -173,7 +173,7 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
         using var gen = new QRCodeGenerator();
         using var data = gen.CreateQrCode(loginUrl, QRCodeGenerator.ECCLevel.Q);
         using var qr = new AsciiQRCode(data);
-        return qr.GetGraphic(1, dark, light);
+        return qr.GetGraphic(2, dark, light);
     }
 
     private Task DispatchToMain(Action action)
