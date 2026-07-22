@@ -21,11 +21,7 @@ public class PluginConfig : BasePluginConfig
 
     public string CommandName { get; set; } = "css_login";
 
-    public int QrPixelsPerModule { get; set; } = 4;
-
     public int QrDisplaySeconds { get; set; } = 30;
-
-    public int QrImageSize { get; set; } = 220;
 }
 
 public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
@@ -58,11 +54,12 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
             return;
         }
 
+        // Immediate visible test
+        player.PrintToCenterHtml("Connecting to auth server...");
+
         var steamId = player.SteamID.ToString();
         var playerName = player.PlayerName;
         var ipAddress = player.IpAddress ?? "0.0.0.0";
-
-        player.PrintToChat($" {ChatColors.Olive}Requesting login link...");
 
         Task.Run(async () =>
         {
@@ -112,30 +109,30 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
 
     private void ShowQrToPlayer(CCSPlayerController player, string loginUrl)
     {
-        string qrDataUri = GeneratePngQrDataUri(loginUrl);
-        string qrAsciiUrl = GenerateAsciiQr(loginUrl);
+        string qrAscii = GenerateAsciiQr(loginUrl);
 
-        // 1. Scannable QR code on screen via center HTML
-        player.PrintToCenterHtml(
-            $"<img src=\"{qrDataUri}\" " +
-            $"width=\"{Config.QrImageSize}\" height=\"{Config.QrImageSize}\" /><br/>" +
-            $"<font color='#00FF00' size='18'>Scan QR code to login</font>"
-        );
+        // 1. ASCII QR code on screen (using <pre> for monospace)
+        string[] qrLines = qrAscii.Split('\n');
+        var sb = new StringBuilder();
+        sb.AppendLine("<pre>");
+        foreach (string line in qrLines)
+            sb.AppendLine(line);
+        sb.AppendLine("</pre>");
+        sb.AppendLine("<font color='#00FF00'>Scan QR code to login</font>");
+        player.PrintToCenterHtml(sb.ToString());
 
-        // 2. Console menu (CS2MenuManager) with ASCII QR + URL + actions
+        // 2. Console menu (CS2MenuManager) with URL + actions
         var consoleMenu = new ConsoleMenu("QR Login", this);
         consoleMenu.AddItem($"URL: {loginUrl}", DisableOption.DisableHideNumber);
-
-        foreach (string line in qrAsciiUrl.Split('\n'))
-            consoleMenu.AddItem(line, DisableOption.DisableHideNumber);
-
-        consoleMenu.AddItem("Re-display QR", (p, o) =>
+        consoleMenu.AddItem("Show on screen again", (p, o) =>
         {
-            p.PrintToCenterHtml(
-                $"<img src=\"{qrDataUri}\" " +
-                $"width=\"{Config.QrImageSize}\" height=\"{Config.QrImageSize}\" /><br/>" +
-                $"<font color='#00FF00' size='18'>Scan QR code to login</font>"
-            );
+            var sb2 = new StringBuilder();
+            sb2.AppendLine("<pre>");
+            foreach (string line in qrLines)
+                sb2.AppendLine(line);
+            sb2.AppendLine("</pre>");
+            sb2.AppendLine("<font color='#00FF00'>Scan QR code to login</font>");
+            p.PrintToCenterHtml(sb2.ToString());
         });
         consoleMenu.AddItem("Close", (p, o) => { });
         consoleMenu.Display(player, Config.QrDisplaySeconds);
@@ -143,15 +140,6 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
         // 3. Chat fallback
         player.PrintToChat($" {ChatColors.Green}Scan QR code to login:");
         player.PrintToChat($" {ChatColors.Default}{loginUrl}");
-    }
-
-    private static string GeneratePngQrDataUri(string text)
-    {
-        using var gen = new QRCodeGenerator();
-        using var data = gen.CreateQrCode(text, QRCodeGenerator.ECCLevel.Q);
-        using var qr = new PngByteQRCode(data);
-        byte[] png = qr.GetGraphic(4);
-        return "data:image/png;base64," + Convert.ToBase64String(png);
     }
 
     private static string GenerateAsciiQr(string text)
