@@ -3,6 +3,7 @@ using System.Text.Json;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Modules.Commands;
+using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
 using QRCoder;
 
@@ -11,13 +12,9 @@ namespace cs2_basic_plugin;
 public class PluginConfig : BasePluginConfig
 {
     public override int Version { get; set; } = 1;
-
     public string BackendUrl { get; set; } = "http://localhost:3000/api/auth/login";
-
     public int HttpTimeoutSeconds { get; set; } = 10;
-
     public string CommandName { get; set; } = "css_login";
-
     public int QrDisplaySeconds { get; set; } = 30;
 }
 
@@ -30,8 +27,6 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
 
     public PluginConfig Config { get; set; } = new();
     private readonly HttpClient _httpClient = new();
-
-    // Track active QR displays per player (key = player.Slot)
     private readonly Dictionary<int, ActiveQr> _activeQrs = new();
 
     public void OnConfigParsed(PluginConfig config)
@@ -42,7 +37,7 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
     public override void Load(bool hotReload)
     {
         AddCommand(Config.CommandName, "Request a QR login link", OnLoginCommand);
-        RegisterListener<Listeners.OnTick>(OnTick);
+        AddTimer(0.3f, OnRefreshTick, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
         Console.WriteLine($"[{ModuleName}] Loaded. Backend: {Config.BackendUrl}");
     }
 
@@ -55,7 +50,7 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
             return;
         }
 
-        player.PrintToCenterHtml("Connecting to auth server...");
+        player.PrintToCenterHtml("Connecting...");
 
         var steamId = player.SteamID.ToString();
         var playerName = player.PlayerName;
@@ -66,10 +61,8 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(Config.HttpTimeoutSeconds));
-
                 var payload = new { steam_id = steamId, player_name = playerName, ip_address = ipAddress };
-                var json = JsonSerializer.Serialize(payload);
-                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
                 var response = await _httpClient.PostAsync(Config.BackendUrl, content, cts.Token);
                 var body = await response.Content.ReadAsStringAsync(cts.Token);
@@ -91,8 +84,7 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
                     return;
                 }
 
-                var loginUrl = result.LoginUrl;
-                await DispatchToMain(() => ShowQrToPlayer(player, loginUrl));
+                await DispatchToMain(() => ShowQrToPlayer(player, result.LoginUrl));
             }
             catch (TaskCanceledException)
             {
@@ -111,50 +103,51 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
     {
         string qrHtml = BuildQrHtml(loginUrl);
 
-        // Register active QR display for OnTick refresh
-        _activeQrs[player.Slot] = new ActiveQr
+        lock (_activeQrs)
         {
-            Html = qrHtml,
-            StartTime = DateTime.UtcNow,
-            Duration = Config.QrDisplaySeconds
-        };
+            _activeQrs[player.Slot] = new ActiveQr
+            {
+                Html = qrHtml,
+                ExpireAt = DateTime.UtcNow.AddSeconds(Config.QrDisplaySeconds)
+            };
+        }
 
-        // Show immediately
         player.PrintToCenterHtml(qrHtml);
-
-        // Chat fallback
         player.PrintToChat($" {ChatColors.Green}Scan QR code to login:");
         player.PrintToChat($" {ChatColors.Default}{loginUrl}");
     }
 
-    private void OnTick()
+    private void OnRefreshTick()
     {
-        var now = DateTime.UtcNow;
-        List<int> toRemove = new();
-
-        foreach (var kvp in _activeQrs)
+        lock (_activeQrs)
         {
-            var slot = kvp.Key;
-            var active = kvp.Value;
+            var now = DateTime.UtcNow;
+            var toRemove = new List<int>();
 
-            if ((now - active.StartTime).TotalSeconds >= active.Duration)
+            foreach (var kvp in _activeQrs)
             {
-                toRemove.Add(slot);
-                continue;
+                int slot = kvp.Key;
+                var qr = kvp.Value;
+
+                if (now >= qr.ExpireAt)
+                {
+                    toRemove.Add(slot);
+                    continue;
+                }
+
+                var player = Utilities.GetPlayerFromSlot(slot);
+                if (player == null || !player.IsValid)
+                {
+                    toRemove.Add(slot);
+                    continue;
+                }
+
+                player.PrintToCenterHtml(qr.Html);
             }
 
-            var player = FindPlayerBySlot(slot);
-            if (player == null)
-            {
-                toRemove.Add(slot);
-                continue;
-            }
-
-            player.PrintToCenterHtml(active.Html);
+            foreach (int slot in toRemove)
+                _activeQrs.Remove(slot);
         }
-
-        foreach (var userId in toRemove)
-            _activeQrs.Remove(userId);
     }
 
     private static string BuildQrHtml(string loginUrl)
@@ -162,21 +155,9 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
         using var gen = new QRCodeGenerator();
         using var data = gen.CreateQrCode(loginUrl, QRCodeGenerator.ECCLevel.Q);
         using var qr = new AsciiQRCode(data);
-        string qrAscii = qr.GetGraphic(1);
-        string[] lines = qrAscii.Split('\n');
-
-        var sb = new StringBuilder();
-        sb.AppendLine("<pre>");
-        foreach (string line in lines)
-            sb.AppendLine(line);
-        sb.AppendLine("</pre>");
-        sb.AppendLine("<font color='#00FF00'>Scan QR code to login</font>");
-        return sb.ToString();
-    }
-
-    private static CCSPlayerController? FindPlayerBySlot(int slot)
-    {
-        return Utilities.GetPlayers().FirstOrDefault(p => p.IsValid && p.Slot == slot);
+        string ascii = qr.GetGraphic(1);
+        return ascii.Replace("\r\n", "<br>").Replace("\n", "<br>")
+            + "<br><font color='#00FF00'>Scan QR code to login</font>";
     }
 
     private Task DispatchToMain(Action action)
@@ -200,8 +181,7 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
 public class ActiveQr
 {
     public string Html { get; set; } = "";
-    public DateTime StartTime { get; set; }
-    public int Duration { get; set; }
+    public DateTime ExpireAt { get; set; }
 }
 
 public class LoginResponse
