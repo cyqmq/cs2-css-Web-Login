@@ -37,6 +37,7 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
     public override void Load(bool hotReload)
     {
         AddCommand(Config.CommandName, "Request a QR login link", OnLoginCommand);
+        AddCommand("css_testconn", "Test backend connection", OnTestConnection);
         AddTimer(0.3f, OnRefreshTick, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
         Console.WriteLine($"[{ModuleName}] Loaded. Backend: {Config.BackendUrl}");
     }
@@ -95,6 +96,47 @@ public class Cs2BasicPlugin : BasePlugin, IPluginConfig<PluginConfig>
             {
                 await DispatchToMain(() =>
                     player.PrintToChat($" {ChatColors.Red}Failed to connect to auth server"));
+            }
+        });
+    }
+
+    [CommandHelper(minArgs: 0, usage: "!testconn")]
+    public void OnTestConnection(CCSPlayerController? player, CommandInfo info)
+    {
+        string caller = player != null ? $"{player.PlayerName} ({player.SteamID})" : "Server console";
+        Console.WriteLine($"[{ModuleName}] Connection test initiated by {caller}...");
+
+        info.ReplyToCommand($" Testing backend: {Config.BackendUrl}");
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(Config.HttpTimeoutSeconds));
+                var payload = new { steam_id = "0", player_name = "test", ip_address = "127.0.0.1" };
+                var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var response = await _httpClient.PostAsync(Config.BackendUrl, content, cts.Token);
+                sw.Stop();
+
+                var body = await response.Content.ReadAsStringAsync(cts.Token);
+                string msg = $"[{ModuleName}] Connection test result: {response.StatusCode} ({sw.ElapsedMilliseconds}ms)\n  Body: {body}";
+
+                Console.WriteLine(msg);
+                await DispatchToMain(() => info.ReplyToCommand(msg.Replace($"[{ModuleName}] ", "")));
+            }
+            catch (TaskCanceledException)
+            {
+                string msg = $"[{ModuleName}] Connection test FAILED: timeout ({Config.HttpTimeoutSeconds}s)";
+                Console.WriteLine(msg);
+                await DispatchToMain(() => info.ReplyToCommand(" Connection test FAILED: timeout"));
+            }
+            catch (Exception ex)
+            {
+                string msg = $"[{ModuleName}] Connection test FAILED: {ex.Message}";
+                Console.WriteLine(msg);
+                await DispatchToMain(() => info.ReplyToCommand($" Connection test FAILED: {ex.Message}"));
             }
         });
     }
