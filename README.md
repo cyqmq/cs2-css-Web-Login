@@ -1,4 +1,7 @@
-# CS2 QR Login — CounterStrikeSharp 插件
+#因发现更为成熟的类似插件，现暂停对该项目的开发
+
+
+## CS2 QR Login — CounterStrikeSharp 插件
 
 CS2 游戏内扫码登录插件。玩家输入 `!login`，插件将 SteamID 发送到你的网站后端，生成一次性登录链接并转为二维码，直接在游戏屏幕上显示。
 
